@@ -5841,6 +5841,25 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 // ymm10 <- [d82 d92 da2 db2]
 // ymm11 <- [d83 d93 da3 db3]
 
+// rotate the columns left by one
+	.macro ROTL_COLS_12X4
+	vmovapd		%ymm0, %ymm12
+	vmovapd		%ymm1, %ymm0
+	vmovapd		%ymm2, %ymm1
+	vmovapd		%ymm3, %ymm2
+	vmovapd		%ymm12, %ymm3
+	vmovapd		%ymm4, %ymm12
+	vmovapd		%ymm5, %ymm4
+	vmovapd		%ymm6, %ymm5
+	vmovapd		%ymm7, %ymm6
+	vmovapd		%ymm12, %ymm7
+	vmovapd		%ymm8, %ymm12
+	vmovapd		%ymm9, %ymm8
+	vmovapd		%ymm10, %ymm9
+	vmovapd		%ymm11, %ymm10
+	vmovapd		%ymm12, %ymm11
+	.endm
+
 #if MACRO_LEVEL>=1
 	.macro INNER_SCALE_AB_12X4_GEN_LIB4
 #else
@@ -5867,8 +5886,6 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vmulpd			%ymm10, %ymm15, %ymm10
 	vmulpd			%ymm11, %ymm15, %ymm11
 
-	movq	%r13, %rax // C1 <- C0
-	addq	%r14, %rax // C1 <- C0 + 4*sdc*sizeof(double)
 
 	// beta
 	vbroadcastsd	0(%r11), %ymm15
@@ -5876,7 +5893,40 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vxorpd			%ymm14, %ymm14, %ymm14 // 0.0
 
 	vucomisd		%xmm15, %xmm14 // beta==0.0 ?
-	je			3f // end
+	je			9f // end
+
+	// rbx <- m0, rbp <- m1, rax <- n0, r15 <- n1
+	// nothing to load
+	cmpl	%ebx, %ebp
+	jle		9f
+	cmpl	%eax, %r15d
+	jle		9f
+
+	// rotate the first n0 columns out of the way
+	movl	%eax, %r15d
+	cmpl	$ 0, %r15d
+	jle		8f
+7:
+	ROTL_COLS_12X4
+	addq	$ 32, %r13
+	subl	$ 1, %r15d
+	jg		7b
+8:
+
+	// do not load the panels of C without rows in [m0, m1)
+	addl	%r12d, %ebx // m0+offset
+	addl	%r12d, %ebp // m1+offset
+	leaq	(%r13, %r14), %r15 // C1
+	leaq	(%r15, %r14), %r10 // C2
+	leaq	(%r10, %r14), %r14 // C3
+	cmpl	$ 4, %ebp
+	cmovle	%r13, %r15
+	cmpl	$ 8, %ebp
+	cmovle	%r15, %r10
+	cmpl	$ 12, %ebp
+	cmovle	%r10, %r14
+	cmpl	$ 4, %ebx
+	cmovge	%r15, %r13
 
 	cmpl	$ 0, %r12d
 	jg		0f
@@ -5892,22 +5942,22 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vmovapd			96(%r13), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm3
 
-	vmovapd			0(%r13, %r14), %ymm14
+	vmovapd			0(%r15), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm4
-	vmovapd			32(%r13, %r14), %ymm14
+	vmovapd			32(%r15), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm5
-	vmovapd			64(%r13, %r14), %ymm14
+	vmovapd			64(%r15), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm6
-	vmovapd			96(%r13, %r14), %ymm14
+	vmovapd			96(%r15), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm7
 
-	vmovapd			0(%r13, %r14, 2), %ymm14
+	vmovapd			0(%r10), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm8
-	vmovapd			32(%r13, %r14, 2), %ymm14
+	vmovapd			32(%r10), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm9
-	vmovapd			64(%r13, %r14, 2), %ymm14
+	vmovapd			64(%r10), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm10
-	vmovapd			96(%r13, %r14, 2), %ymm14
+	vmovapd			96(%r10), %ymm14
 	vfmadd231pd		%ymm14, %ymm15, %ymm11
 
 	jmp		3f
@@ -5920,9 +5970,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	// offset==1
 
 	vmovapd			0(%r13), %ymm12
-	vmovapd			0(%r13, %r14), %ymm13
-	vmovapd			0(%r13, %r14, 2), %ymm14
-	vmovapd			0(%rax, %r14, 2), %ymm15
+	vmovapd			0(%r15), %ymm13
+	vmovapd			0(%r10), %ymm14
+	vmovapd			0(%r14), %ymm15
 	vblendpd		$ 0x1, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x1, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x1, %ymm15, %ymm14, %ymm14
@@ -5938,9 +5988,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm8
 
 	vmovapd			32(%r13), %ymm12
-	vmovapd			32(%r13, %r14), %ymm13
-	vmovapd			32(%r13, %r14, 2), %ymm14
-	vmovapd			32(%rax, %r14, 2), %ymm15
+	vmovapd			32(%r15), %ymm13
+	vmovapd			32(%r10), %ymm14
+	vmovapd			32(%r14), %ymm15
 	vblendpd		$ 0x1, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x1, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x1, %ymm15, %ymm14, %ymm14
@@ -5956,9 +6006,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm9
 
 	vmovapd			64(%r13), %ymm12
-	vmovapd			64(%r13, %r14), %ymm13
-	vmovapd			64(%r13, %r14, 2), %ymm14
-	vmovapd			64(%rax, %r14, 2), %ymm15
+	vmovapd			64(%r15), %ymm13
+	vmovapd			64(%r10), %ymm14
+	vmovapd			64(%r14), %ymm15
 	vblendpd		$ 0x1, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x1, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x1, %ymm15, %ymm14, %ymm14
@@ -5974,9 +6024,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm10
 
 	vmovapd			96(%r13), %ymm12
-	vmovapd			96(%r13, %r14), %ymm13
-	vmovapd			96(%r13, %r14, 2), %ymm14
-	vmovapd			96(%rax, %r14, 2), %ymm15
+	vmovapd			96(%r15), %ymm13
+	vmovapd			96(%r10), %ymm14
+	vmovapd			96(%r14), %ymm15
 	vblendpd		$ 0x1, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x1, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x1, %ymm15, %ymm14, %ymm14
@@ -6001,9 +6051,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	// offset==2
 
 	vmovapd			0(%r13), %ymm12
-	vmovapd			0(%r13, %r14), %ymm13
-	vmovapd			0(%r13, %r14, 2), %ymm14
-	vmovapd			0(%rax, %r14, 2), %ymm15
+	vmovapd			0(%r15), %ymm13
+	vmovapd			0(%r10), %ymm14
+	vmovapd			0(%r14), %ymm15
 	vblendpd		$ 0x3, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x3, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x3, %ymm15, %ymm14, %ymm14
@@ -6016,9 +6066,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm8
 
 	vmovapd			32(%r13), %ymm12
-	vmovapd			32(%r13, %r14), %ymm13
-	vmovapd			32(%r13, %r14, 2), %ymm14
-	vmovapd			32(%rax, %r14, 2), %ymm15
+	vmovapd			32(%r15), %ymm13
+	vmovapd			32(%r10), %ymm14
+	vmovapd			32(%r14), %ymm15
 	vblendpd		$ 0x3, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x3, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x3, %ymm15, %ymm14, %ymm14
@@ -6031,9 +6081,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm9
 
 	vmovapd			64(%r13), %ymm12
-	vmovapd			64(%r13, %r14), %ymm13
-	vmovapd			64(%r13, %r14, 2), %ymm14
-	vmovapd			64(%rax, %r14, 2), %ymm15
+	vmovapd			64(%r15), %ymm13
+	vmovapd			64(%r10), %ymm14
+	vmovapd			64(%r14), %ymm15
 	vblendpd		$ 0x3, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x3, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x3, %ymm15, %ymm14, %ymm14
@@ -6046,9 +6096,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm10
 
 	vmovapd			96(%r13), %ymm12
-	vmovapd			96(%r13, %r14), %ymm13
-	vmovapd			96(%r13, %r14, 2), %ymm14
-	vmovapd			96(%rax, %r14, 2), %ymm15
+	vmovapd			96(%r15), %ymm13
+	vmovapd			96(%r10), %ymm14
+	vmovapd			96(%r14), %ymm15
 	vblendpd		$ 0x3, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x3, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x3, %ymm15, %ymm14, %ymm14
@@ -6068,9 +6118,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	// offset==3
 
 	vmovapd			0(%r13), %ymm12
-	vmovapd			0(%r13, %r14), %ymm13
-	vmovapd			0(%r13, %r14, 2), %ymm14
-	vmovapd			0(%rax, %r14, 2), %ymm15
+	vmovapd			0(%r15), %ymm13
+	vmovapd			0(%r10), %ymm14
+	vmovapd			0(%r14), %ymm15
 	vblendpd		$ 0x7, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x7, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x7, %ymm15, %ymm14, %ymm14
@@ -6086,9 +6136,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm8
 
 	vmovapd			32(%r13), %ymm12
-	vmovapd			32(%r13, %r14), %ymm13
-	vmovapd			32(%r13, %r14, 2), %ymm14
-	vmovapd			32(%rax, %r14, 2), %ymm15
+	vmovapd			32(%r15), %ymm13
+	vmovapd			32(%r10), %ymm14
+	vmovapd			32(%r14), %ymm15
 	vblendpd		$ 0x7, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x7, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x7, %ymm15, %ymm14, %ymm14
@@ -6104,9 +6154,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm9
 
 	vmovapd			64(%r13), %ymm12
-	vmovapd			64(%r13, %r14), %ymm13
-	vmovapd			64(%r13, %r14, 2), %ymm14
-	vmovapd			64(%rax, %r14, 2), %ymm15
+	vmovapd			64(%r15), %ymm13
+	vmovapd			64(%r10), %ymm14
+	vmovapd			64(%r14), %ymm15
 	vblendpd		$ 0x7, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x7, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x7, %ymm15, %ymm14, %ymm14
@@ -6122,9 +6172,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd		%ymm14, %ymm15, %ymm10
 
 	vmovapd			96(%r13), %ymm12
-	vmovapd			96(%r13, %r14), %ymm13
-	vmovapd			96(%r13, %r14, 2), %ymm14
-	vmovapd			96(%rax, %r14, 2), %ymm15
+	vmovapd			96(%r15), %ymm13
+	vmovapd			96(%r10), %ymm14
+	vmovapd			96(%r14), %ymm15
 	vblendpd		$ 0x7, %ymm13, %ymm12, %ymm12
 	vblendpd		$ 0x7, %ymm14, %ymm13, %ymm13
 	vblendpd		$ 0x7, %ymm15, %ymm14, %ymm14
@@ -6141,6 +6191,17 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 
 
 3:
+
+	// rotate the columns back
+	cmpl	$ 0, %eax
+	jle		9f
+	movl	$ 4, %r15d
+	subl	%eax, %r15d
+7:
+	ROTL_COLS_12X4
+	subl	$ 1, %r15d
+	jg		7b
+9:
 
 #if MACRO_LEVEL>=1
 	.endm
@@ -6191,6 +6252,23 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 // ymm11 <- dirty
 // ymm15 <- dirty
 
+// rotate the columns left by one
+	.macro ROTL_COLS_4X12
+	vmovapd		%ymm0, %ymm12
+	vmovapd		%ymm1, %ymm0
+	vmovapd		%ymm2, %ymm1
+	vmovapd		%ymm3, %ymm2
+	vmovapd		%ymm4, %ymm3
+	vmovapd		%ymm5, %ymm4
+	vmovapd		%ymm6, %ymm5
+	vmovapd		%ymm7, %ymm6
+	vmovapd		%ymm8, %ymm7
+	vmovapd		%ymm9, %ymm8
+	vmovapd		%ymm10, %ymm9
+	vmovapd		%ymm11, %ymm10
+	vmovapd		%ymm12, %ymm11
+	.endm
+
 #if MACRO_LEVEL>=1
 	.macro INNER_SCALE_AB_4X12_GEN_LIB4
 #else
@@ -6220,7 +6298,42 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vxorpd		%ymm14, %ymm14, %ymm14 // 0.0
 
 	vucomisd	%xmm15, %xmm14 // beta==0.0 ?
-	je			3f // end
+	je			9f // end
+
+	// rbx <- m0, rbp <- m1, rax <- n0, r15 <- n1
+	// nothing to load
+	cmpl	%ebx, %ebp
+	jle		9f
+	cmpl	%eax, %r15d
+	jle		9f
+
+	// number of columns of C to load
+	movl	$ 12, %r10d
+	cmpl	%r10d, %r15d
+	cmovl	%r15d, %r10d
+	subl	%eax, %r10d
+
+	// rotate the first n0 columns out of the way
+	movl	%eax, %r15d
+	cmpl	$ 0, %r15d
+	jle		8f
+7:
+	ROTL_COLS_4X12
+	addq	$ 32, %r13
+	subl	$ 1, %r15d
+	jg		7b
+8:
+
+	// do not load the panels of C without rows in [m0, m1)
+	addl	%r12d, %ebx // m0+offset
+	addl	%r12d, %ebp // m1+offset
+	leaq	(%r13, %r14), %r15
+	cmpl	$ 4, %ebx
+	cmovge	%r15, %r13
+	movl	$ 0, %r15d
+	cmovge	%r15, %r14
+	cmpl	$ 4, %ebp
+	cmovle	%r15, %r14
 
 	cmpl	$ 0, %r12d
 	jg		0f
@@ -6235,6 +6348,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd	%ymm12, %ymm15, %ymm2
 	vmovapd		96(%r13), %ymm12
 	vfmadd231pd	%ymm12, %ymm15, %ymm3
+	cmpl	$ 4, %r10d
+	jle		3f
+
 	vmovapd		128(%r13), %ymm12
 	vfmadd231pd	%ymm12, %ymm15, %ymm4
 	vmovapd		160(%r13), %ymm12
@@ -6243,6 +6359,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd	%ymm12, %ymm15, %ymm6
 	vmovapd		224(%r13), %ymm12
 	vfmadd231pd	%ymm12, %ymm15, %ymm7
+	cmpl	$ 8, %r10d
+	jle		3f
+
 	vmovapd		256(%r13), %ymm12
 	vfmadd231pd	%ymm12, %ymm15, %ymm8
 	vmovapd		288(%r13), %ymm12
@@ -6290,6 +6409,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd	%ymm12, %ymm15, %ymm2
 	vfmadd231pd	%ymm13, %ymm15, %ymm3
 
+	cmpl	$ 4, %r10d
+	jle		3f
+
 	vmovapd		128(%r13), %ymm12
 	vmovapd		128(%r15), %ymm14
 	vblendpd	$ 0x1, %ymm14, %ymm12, %ymm12
@@ -6315,6 +6437,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vshufpd		$ 0x5, %ymm14, %ymm13, %ymm13
 	vfmadd231pd	%ymm12, %ymm15, %ymm6
 	vfmadd231pd	%ymm13, %ymm15, %ymm7
+
+	cmpl	$ 8, %r10d
+	jle		3f
 
 	vmovapd		256(%r13), %ymm12
 	vmovapd		256(%r15), %ymm14
@@ -6373,6 +6498,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd	%ymm12, %ymm15, %ymm2
 	vfmadd231pd	%ymm13, %ymm15, %ymm3
 
+	cmpl	$ 4, %r10d
+	jle		3f
+
 	vmovapd		128(%r13), %ymm12
 	vmovapd		128(%r15), %ymm14
 	vblendpd	$ 0x3, %ymm14, %ymm12, %ymm12
@@ -6394,6 +6522,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vperm2f128	$ 0x01, %ymm13, %ymm13, %ymm13
 	vfmadd231pd	%ymm12, %ymm15, %ymm6
 	vfmadd231pd	%ymm13, %ymm15, %ymm7
+
+	cmpl	$ 8, %r10d
+	jle		3f
 
 	vmovapd		256(%r13), %ymm12
 	vmovapd		256(%r15), %ymm14
@@ -6449,6 +6580,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd	%ymm12, %ymm15, %ymm2
 	vfmadd231pd	%ymm13, %ymm15, %ymm3
 
+	cmpl	$ 4, %r10d
+	jle		3f
+
 	vmovapd		128(%r13), %ymm12
 	vmovapd		128(%r15), %ymm14
 	vblendpd	$ 0x7, %ymm14, %ymm12, %ymm12
@@ -6474,6 +6608,9 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vshufpd		$ 0x5, %ymm13, %ymm14, %ymm13
 	vfmadd231pd	%ymm12, %ymm15, %ymm6
 	vfmadd231pd	%ymm13, %ymm15, %ymm7
+
+	cmpl	$ 8, %r10d
+	jle		3f
 
 	vmovapd		256(%r13), %ymm12
 	vmovapd		256(%r15), %ymm14
@@ -6502,6 +6639,17 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	vfmadd231pd	%ymm13, %ymm15, %ymm11
 
 3:
+
+	// rotate the columns back
+	cmpl	$ 0, %eax
+	jle		9f
+	movl	$ 12, %r15d
+	subl	%eax, %r15d
+7:
+	ROTL_COLS_4X12
+	subl	$ 1, %r15d
+	jg		7b
+9:
 
 #if MACRO_LEVEL>=1
 	.endm
@@ -12720,6 +12868,11 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	movq	ARG9, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
 
+	movq	ARG13, %rbx // m0
+	movq	ARG14, %rbp // m1
+	movq	ARG15, %rax // n0
+	movq	ARG16, %r15 // n1
+
 #if MACRO_LEVEL>=1
 	INNER_SCALE_AB_12X4_GEN_LIB4
 #else
@@ -13093,6 +13246,11 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	movq	ARG10, %r13 // C
 	movq	ARG11, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
+
+	movq	ARG15, %rbx // m0
+	movq	ARG16, %rbp // m1
+	movq	ARG17, %rax // n0
+	movq	ARG18, %r15 // n1
 
 #if MACRO_LEVEL>=1
 	INNER_SCALE_AB_12X4_GEN_LIB4
@@ -13496,6 +13654,11 @@ FUN_END(inner_kernel_dgemm_nt_12x4_lib4)
 	movq	ARG10, %r13 // C
 	movq	ARG11, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
+
+	movq	ARG15, %rbx // m0
+	movq	ARG16, %rbp // m1
+	movq	ARG17, %rax // n0
+	movq	ARG18, %r15 // n1
 
 #if MACRO_LEVEL>=1
 	INNER_SCALE_AB_4X12_GEN_LIB4

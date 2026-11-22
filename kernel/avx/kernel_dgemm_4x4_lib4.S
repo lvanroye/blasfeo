@@ -2966,6 +2966,15 @@ NAME:
 // ymm11 <- dirty
 // ymm15 <- dirty
 
+// rotate the columns left by one
+	.macro ROTL_COLS_4X4
+	vmovapd		%ymm0, %ymm12
+	vmovapd		%ymm1, %ymm0
+	vmovapd		%ymm2, %ymm1
+	vmovapd		%ymm3, %ymm2
+	vmovapd		%ymm12, %ymm3
+	.endm
+
 #if MACRO_LEVEL>=1
 	.macro INNER_SCALE_AB_4X4_GEN_LIB4
 #else
@@ -2987,7 +2996,36 @@ NAME:
 	vxorpd		%ymm14, %ymm14, %ymm14 // 0.0
 
 	vucomisd	%xmm15, %xmm14 // beta==0.0 ?
-	je			3f // end
+	je			9f // end
+
+	// rbx <- m0, rbp <- m1, rax <- n0, r15 <- n1
+	// nothing to load
+	cmpl	%ebx, %ebp
+	jle		9f
+	cmpl	%eax, %r15d
+	jle		9f
+
+	// rotate the first n0 columns out of the way
+	movl	%eax, %r15d
+	cmpl	$ 0, %r15d
+	jle		8f
+7:
+	ROTL_COLS_4X4
+	addq	$ 32, %r13
+	subl	$ 1, %r15d
+	jg		7b
+8:
+
+	// do not load the panels of C without rows in [m0, m1)
+	addl	%r12d, %ebx // m0+offset
+	addl	%r12d, %ebp // m1+offset
+	leaq	(%r13, %r14), %r15
+	cmpl	$ 4, %ebx
+	cmovge	%r15, %r13
+	movl	$ 0, %r15d
+	cmovge	%r15, %r14
+	cmpl	$ 4, %ebp
+	cmovle	%r15, %r14
 
 	cmpl	$ 0, %r12d
 	jg		0f
@@ -3118,6 +3156,17 @@ NAME:
 	vaddpd		%ymm3, %ymm13, %ymm3
 
 3:
+
+	// rotate the columns back
+	cmpl	$ 0, %eax
+	jle		9f
+	movl	$ 4, %r15d
+	subl	%eax, %r15d
+7:
+	ROTL_COLS_4X4
+	subl	$ 1, %r15d
+	jg		7b
+9:
 
 #if MACRO_LEVEL>=1
 	.endm
@@ -3474,7 +3523,36 @@ NAME:
 	vxorpd		%ymm14, %ymm14, %ymm14 // 0.0
 
 	vucomisd	%xmm15, %xmm14 // beta==0.0 ?
-	je			3f // end
+	je			9f // end
+
+	// rbx <- m0, rbp <- m1, rax <- n0, r15 <- n1
+	// nothing to load
+	cmpl	%ebx, %ebp
+	jle		9f
+	cmpl	%eax, %r15d
+	jle		9f
+
+	// rotate the first n0 columns out of the way
+	movl	%eax, %r15d
+	cmpl	$ 0, %r15d
+	jle		8f
+7:
+	ROTL_COLS_4X4
+	addq	$ 32, %r13
+	subl	$ 1, %r15d
+	jg		7b
+8:
+
+	// do not load the panels of C without rows in [m0, m1)
+	addl	%r12d, %ebx // m0+offset
+	addl	%r12d, %ebp // m1+offset
+	leaq	(%r13, %r14), %r15
+	cmpl	$ 4, %ebx
+	cmovge	%r15, %r13
+	movl	$ 0, %r15d
+	cmovge	%r15, %r14
+	cmpl	$ 4, %ebp
+	cmovle	%r15, %r14
 
 	cmpl	$ 0, %r12d
 	jg		0f
@@ -3605,6 +3683,17 @@ NAME:
 	vaddpd		%ymm3, %ymm13, %ymm3
 
 3:
+
+	// rotate the columns back
+	cmpl	$ 0, %eax
+	jle		9f
+	movl	$ 4, %r15d
+	subl	%eax, %r15d
+7:
+	ROTL_COLS_4X4
+	subl	$ 1, %r15d
+	jg		7b
+9:
 
 #if MACRO_LEVEL>=1
 	.endm
@@ -7432,6 +7521,11 @@ NAME:
 	movq	ARG8, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
 
+	movq	ARG12, %rbx // m0
+	movq	ARG13, %rbp // m1
+	movq	ARG14, %rax // n0
+	movq	ARG15, %r15 // n1
+
 #if MACRO_LEVEL>=1
 	INNER_BLEND_SCALE_AB_4X4_GEN_LIB4
 #else
@@ -7650,6 +7744,11 @@ NAME:
 	movq	ARG9, %r13 // C
 	movq	ARG10, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
+
+	movq	ARG14, %rbx // m0
+	movq	ARG15, %rbp // m1
+	movq	ARG16, %rax // n0
+	movq	ARG17, %r15 // n1
 
 #if MACRO_LEVEL>=1
 	INNER_SCALE_AB_4X4_GEN_LIB4
@@ -7887,6 +7986,11 @@ NAME:
 	movq	ARG9, %r13 // C
 	movq	ARG10, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
+
+	movq	ARG14, %rbx // m0
+	movq	ARG15, %rbp // m1
+	movq	ARG16, %rax // n0
+	movq	ARG17, %r15 // n1
 
 #if MACRO_LEVEL>=1
 	INNER_SCALE_AB_4X4_GEN_LIB4
@@ -8228,6 +8332,11 @@ NAME:
 	movq	ARG8, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
 
+	movq	ARG12, %rbx // m0
+	movq	ARG13, %rbp // m1
+	movq	ARG14, %rax // n0
+	movq	ARG15, %r15 // n1
+
 #if MACRO_LEVEL>=1
 	INNER_BLEND_SCALE_AB_4X4_GEN_LIB4
 #else
@@ -8424,6 +8533,11 @@ NAME:
 	movq	ARG7, %r13 // C
 	movq	ARG8, %r14 // sdc
 	sall	$ 5, %r14d // 4*sdc*sizeof(double)
+
+	movq	ARG12, %rbx // m0
+	movq	ARG13, %rbp // m1
+	movq	ARG14, %rax // n0
+	movq	ARG15, %r15 // n1
 
 #if MACRO_LEVEL>=1
 	INNER_BLEND_SCALE_AB_4X4_GEN_LIB4
