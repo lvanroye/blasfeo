@@ -1902,7 +1902,17 @@ NAME:
 //	vmulpd			%ymm12, %ymm0, %ymm1
 //	vblendpd		$ 0x8, %ymm1, %ymm0, %ymm0
 
-	vmovupd			0(%r13), %ymm12
+	// mask out x beyond k
+	vcvtsi2sd		%r12d, %xmm15, %xmm15
+#if defined(OS_LINUX) | defined(OS_WINDOWS)
+	vmovupd			.LC02(%rip), %ymm13
+#elif defined(OS_MAC)
+	vmovupd			LC02(%rip), %ymm13
+#endif
+	vmovddup		%xmm15, %xmm15
+	vinsertf128		$ 1, %xmm15, %ymm15, %ymm15
+	vsubpd			%ymm15, %ymm13, %ymm15
+	vmaskmovpd		0(%r13), %ymm15, %ymm12
 	vblendpd		$ 0x8, %ymm12, %ymm0, %ymm0
 	
 	cmpl			$ 4, %r12d
@@ -1995,7 +2005,17 @@ NAME:
 //	vmulpd			%ymm12, %ymm0, %ymm1
 //	vblendpd		$ 0x8, %ymm1, %ymm0, %ymm0
 
-	vmovupd			0(%r13), %ymm12
+	// mask out x beyond k
+	vcvtsi2sd		%r12d, %xmm15, %xmm15
+#if defined(OS_LINUX) | defined(OS_WINDOWS)
+	vmovupd			.LC02(%rip), %ymm13
+#elif defined(OS_MAC)
+	vmovupd			LC02(%rip), %ymm13
+#endif
+	vmovddup		%xmm15, %xmm15
+	vinsertf128		$ 1, %xmm15, %ymm15, %ymm15
+	vsubpd			%ymm15, %ymm13, %ymm15
+	vmaskmovpd		0(%r13), %ymm15, %ymm12
 	vblendpd		$ 0xc, %ymm12, %ymm0, %ymm0
 	
 	je				0f
@@ -2076,7 +2096,17 @@ NAME:
 	
 	vxorpd			%ymm14, %ymm14, %ymm14
 
-	vmovupd			0(%r13), %ymm12
+	// mask out x beyond k
+	vcvtsi2sd		%r12d, %xmm15, %xmm15
+#if defined(OS_LINUX) | defined(OS_WINDOWS)
+	vmovupd			.LC02(%rip), %ymm13
+#elif defined(OS_MAC)
+	vmovupd			LC02(%rip), %ymm13
+#endif
+	vmovddup		%xmm15, %xmm15
+	vinsertf128		$ 1, %xmm15, %ymm15, %ymm15
+	vsubpd			%ymm15, %ymm13, %ymm15
+	vmaskmovpd		0(%r13), %ymm15, %ymm12
 	vblendpd		$ 0xe, %ymm12, %ymm0, %ymm0
 	
 	cmpl			$ 3, %r12d
